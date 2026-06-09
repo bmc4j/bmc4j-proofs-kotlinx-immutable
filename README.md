@@ -18,8 +18,19 @@ This repo is intentionally **one library per repo** (spin up a sibling repo for 
 
 ## Status
 
-🚧 **Scaffolding only — no proofs yet.** Proofs land once a bmc4j **release candidate** is published; the
-plugin version in `build.gradle.kts` (`0.2.0-RC1`) is a placeholder to bump when the RC is cut.
+First proofs landed — emptiness/size/lookup invariants for `PersistentList` / `PersistentSet` /
+`PersistentMap`, each proven symbolically over the library's shipped bytecode.
+
+Two jbmc 6.9.0 engine boundaries currently bound what we assert (both are engine limitations, not
+library bugs, and both fail conservatively — never a false pass):
+
+- **element-array mutation** (`add`/`set`/`removeAt`/`put`) copies the persistent collections'
+  internal `Array<Any?>`, which meets the array-symex boundary
+  ([bmc4j#178](https://github.com/bmc4j/bmc4j/issues/178), exit 6 → UNKNOWN);
+- **list `contains`/`indexOf`** dispatches through the list iterator (a devirt-fragile path); the trie
+  lookups behind `PersistentSet.contains` / `PersistentMap.containsKey` prove cleanly.
+
+Mutation/iteration laws will be reclaimed as the engine moves past these boundaries.
 
 ## Running (once proofs exist)
 

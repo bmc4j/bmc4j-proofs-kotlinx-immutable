@@ -1,8 +1,8 @@
 plugins {
     kotlin("jvm") version "2.0.21"
     // bmc4j applies `java` + JUnit 5 and wires the proof runtime + the bundled engine, so a `@BmcProof`
-    // is just a JUnit 5 test. Version is the release candidate — bump when the RC is published.
-    id("org.bmc4j") version "0.2.0-RC1"
+    // is just a JUnit 5 test. Tracks the latest published bmc4j release.
+    id("org.bmc4j") version "0.3.0"
 }
 
 kotlin {
