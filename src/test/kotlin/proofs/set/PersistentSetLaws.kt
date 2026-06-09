@@ -23,4 +23,14 @@ class PersistentSetLaws {
         val x = Bmc.anyInt()
         Bmc.check(!s.contains(x))
     }
+
+    /** Counterexample demo: no int is a member of the empty set, so this membership claim is refuted
+     *  for every value. Left un-pinned (no expect) so the REFUTED verdict + counterexample surface in
+     *  the proof-results report. */
+    @BmcProof
+    fun empty_set_contains_an_arbitrary_element() {
+        val s = persistentSetOf<Int>()
+        val x = Bmc.anyInt()
+        Bmc.check(s.contains(x))
+    }
 }

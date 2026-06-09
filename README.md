@@ -19,7 +19,11 @@ This repo is intentionally **one library per repo** (spin up a sibling repo for 
 ## Status
 
 First proofs landed — emptiness/size/lookup invariants for `PersistentList` / `PersistentSet` /
-`PersistentMap`, each proven symbolically over the library's shipped bytecode.
+`PersistentMap`, each proven symbolically over the library's shipped bytecode. Each type also carries a
+**deliberately false** proof (e.g. "the empty set contains this element"); bmc4j refutes it and reports
+the counterexample (`x = 15`), which the CI proof-results comment surfaces. These are left un-pinned (no
+`expect`) on purpose, so they show up as real REFUTED results with their witness — which means a run
+that includes them is reported red.
 
 Two jbmc 6.9.0 engine boundaries currently bound what we assert (both are engine limitations, not
 library bugs, and both fail conservatively — never a false pass):

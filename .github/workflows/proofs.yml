@@ -44,23 +44,46 @@ jobs:
         if: ${{ always() }}
         uses: actions/github-script@v7
         with:
+          # Parse the JUnit XML (not stdout) so the report can show each refuted proof's
+          # COUNTEREXAMPLE, not just its verdict. A passing testcase is VERIFIED; a failing one
+          # carries the bmc4j exception type (BmcVerificationError -> REFUTED, BmcUndecidedError ->
+          # UNKNOWN) and a failure message whose "counterexample: ..." line is the witness JBMC found.
           script: |
-            const fs = require('fs');
-            const out = fs.existsSync('proof-output.txt') ? fs.readFileSync('proof-output.txt', 'utf8') : '';
-            // Per-proof lines: "  bmc4j < OK      Class.method() (1.2s)"
-            const emoji = { OK: '✅', VERIFIED: '✅', REFUTED: '❌', UNKNOWN: '⚠️', ERROR: '🛑', SKIP: '⏭️' };
-            const rows = [...out.matchAll(/bmc4j < (\S+)\s+(\S+)\s+\(([^)]*)\)/g)]
-              .map(m => `| \`${m[2]}\` | ${emoji[m[1]] || ''} ${m[1]} | ${m[3]} |`);
-            // Final tally: "bmc4j: N proofs -> V verified, R refuted, U unknown (Ts)"
-            const tally = (out.match(/bmc4j: \d+ proofs ->.*/g) || []).slice(-1)[0] || '(no bmc4j summary — no proofs ran)';
+            const fs = require('fs'), path = require('path');
+            const dir = 'build/test-results/test';
+            const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.xml')) : [];
+            const dec = s => s.replace(/&#10;/g, '\n').replace(/&#13;/g, '').replace(/&quot;/g, '"')
+              .replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+            const results = [];
+            for (const f of files) {
+              const xml = fs.readFileSync(path.join(dir, f), 'utf8');
+              const cases = xml.match(/<testcase\b[\s\S]*?(?:\/>|<\/testcase>)/g) || [];
+              for (const c of cases) {
+                const name = (c.match(/\bname="([^"]*)"/) || [])[1] || '?';
+                const cls = (c.match(/\bclassname="([^"]*)"/) || [])[1] || '';
+                const simple = cls.split('.').pop();
+                const fail = c.match(/<failure\b[^>]*\btype="([^"]*)"[\s\S]*?<\/failure>/);
+                if (!fail) { results.push({ name, cls: simple, verdict: 'VERIFIED' }); continue; }
+                const verdict = fail[1].includes('BmcUndecidedError') ? 'UNKNOWN' : 'REFUTED';
+                const msg = dec(fail[0]);
+                const ce = (msg.match(/counterexample:\s*(.+)/) || [])[1];
+                results.push({ name, cls: simple, verdict, detail: ce ? ce.trim() : '' });
+              }
+            }
+            const order = { REFUTED: 0, UNKNOWN: 1, VERIFIED: 2 };
+            results.sort((a, b) => (order[a.verdict] - order[b.verdict]) || a.name.localeCompare(b.name));
+            const emoji = { VERIFIED: '✅', REFUTED: '❌', UNKNOWN: '⚠️' };
+            const n = results.length;
+            const c = v => results.filter(r => r.verdict === v).length;
+            const tally = n
+              ? `${n} proofs → ${c('VERIFIED')} verified, ${c('REFUTED')} refuted, ${c('UNKNOWN')} unknown`
+              : '(no proofs ran)';
+            const rows = results.map(r =>
+              `| \`${r.cls}.${r.name}\` | ${emoji[r.verdict]} ${r.verdict} | ${r.detail ? '`' + r.detail + '`' : ''} |`);
             const marker = '<!-- bmc4j-proof-report -->';
             const body = [
-              marker,
-              '## bmc4j proof results',
-              '',
-              '`' + tally + '`',
-              '',
-              rows.length ? ['| Proof | Verdict | Time |', '|---|---|---|', ...rows].join('\n') : '_No proofs ran yet._',
+              marker, '## bmc4j proof results', '', '`' + tally + '`', '',
+              n ? ['| Proof | Verdict | Counterexample |', '|---|---|---|', ...rows].join('\n') : '_No proofs ran._',
             ].join('\n');
             await core.summary.addRaw(body).write();
             if (context.eventName === 'pull_request') {

@@ -15,3 +15,6 @@ Thumbs.db
 
 # bmc4j local engine/cache (resolved per-machine)
 .bmc4j/
+
+# Local agent worktrees / scratch
+.claude/

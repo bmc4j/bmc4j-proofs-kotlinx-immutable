@@ -23,4 +23,14 @@ class PersistentMapLaws {
         val k = Bmc.anyInt()
         Bmc.check(!m.containsKey(k) && m[k] == null)
     }
+
+    /** Counterexample demo: the empty map has no mapping for any key, so this claim is refuted for
+     *  every key. Left un-pinned (no expect) so the REFUTED verdict + counterexample surface in the
+     *  proof-results report. */
+    @BmcProof
+    fun empty_map_has_an_arbitrary_key() {
+        val m = persistentMapOf<Int, Int>()
+        val k = Bmc.anyInt()
+        Bmc.check(m.containsKey(k))
+    }
 }

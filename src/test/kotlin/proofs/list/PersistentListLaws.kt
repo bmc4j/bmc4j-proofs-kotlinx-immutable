@@ -23,4 +23,13 @@ class PersistentListLaws {
         val l = persistentListOf<Int>()
         Bmc.check(l.size == 0 && l.isEmpty())
     }
+
+    /** Counterexample demo: the empty list IS empty, so this false claim is refuted — bmc4j reports
+     *  the violating case. Left un-pinned (no expect) so the REFUTED verdict + counterexample surface
+     *  in the proof-results report. */
+    @BmcProof
+    fun empty_list_is_nonempty() {
+        val l = persistentListOf<Int>()
+        Bmc.check(!l.isEmpty())
+    }
 }
