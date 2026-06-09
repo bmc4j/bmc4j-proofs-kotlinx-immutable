@@ -1,0 +1,82 @@
+name: bmc4j proofs
+
+# Runs the @BmcProof suite on every PR and posts a proof-results report as a PR comment —
+# mirroring bmc4j's own CI report (verified / refuted / unknown per proof + a tally). Self-contained
+# for now; once bmc4j ships a reusable proof-report workflow this can `uses:` it instead.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  prove:
+    name: prove
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Run every @BmcProof (each is a JUnit 5 test). Capture the bmc4j progress/summary output and
+      # don't fail the step yet — we post the report first, then fail the job below if any proof did.
+      - name: Run proofs
+        run: |
+          set -o pipefail
+          if ./gradlew test --console=plain 2>&1 | tee proof-output.txt; then
+            echo "PROOFS_OK=1" >> "$GITHUB_ENV"
+          else
+            echo "PROOFS_OK=0" >> "$GITHUB_ENV"
+          fi
+
+      - name: Report proof results
+        if: ${{ always() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const out = fs.existsSync('proof-output.txt') ? fs.readFileSync('proof-output.txt', 'utf8') : '';
+            // Per-proof lines: "  bmc4j < OK      Class.method() (1.2s)"
+            const emoji = { OK: '✅', VERIFIED: '✅', REFUTED: '❌', UNKNOWN: '⚠️', ERROR: '🛑', SKIP: '⏭️' };
+            const rows = [...out.matchAll(/bmc4j < (\S+)\s+(\S+)\s+\(([^)]*)\)/g)]
+              .map(m => `| \`${m[2]}\` | ${emoji[m[1]] || ''} ${m[1]} | ${m[3]} |`);
+            // Final tally: "bmc4j: N proofs -> V verified, R refuted, U unknown (Ts)"
+            const tally = (out.match(/bmc4j: \d+ proofs ->.*/g) || []).slice(-1)[0] || '(no bmc4j summary — no proofs ran)';
+            const marker = '<!-- bmc4j-proof-report -->';
+            const body = [
+              marker,
+              '## bmc4j proof results',
+              '',
+              '`' + tally + '`',
+              '',
+              rows.length ? ['| Proof | Verdict | Time |', '|---|---|---|', ...rows].join('\n') : '_No proofs ran yet._',
+            ].join('\n');
+            await core.summary.addRaw(body).write();
+            if (context.eventName === 'pull_request') {
+              const { owner, repo } = context.repo;
+              const issue_number = context.payload.pull_request.number;
+              const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+              const existing = comments.find(c => c.body && c.body.includes(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            }
+
+      - name: Fail if any proof did not verify
+        if: ${{ env.PROOFS_OK != '1' }}
+        run: |
+          echo "::error::One or more proofs did not verify — see the proof-results report."
+          exit 1
