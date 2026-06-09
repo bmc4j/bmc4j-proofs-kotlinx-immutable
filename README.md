@@ -18,32 +18,41 @@ This repo is intentionally **one library per repo** (spin up a sibling repo for 
 
 ## Status
 
-First proofs landed — emptiness/size/lookup invariants for `PersistentList` / `PersistentSet` /
-`PersistentMap`, each proven symbolically over the library's shipped bytecode. Each type also carries a
-**deliberately false** proof (e.g. "the empty set contains this element"); bmc4j refutes it and reports
-the counterexample (`x = 15`), which the CI proof-results comment surfaces. These are left un-pinned (no
-`expect`) on purpose, so they show up as real REFUTED results with their witness — which means a run
-that includes them is reported red.
+Structural proofs over `PersistentList` / `PersistentSet` / `PersistentMap`, each holding for *every*
+symbolic input over the library's shipped bytecode:
 
-Two jbmc 6.9.0 engine boundaries currently bound what we assert (both are engine limitations, not
-library bugs, and both fail conservatively — never a false pass):
+- **`PersistentList`** — `add` then read returns the element; **immutability**: `add` produces a new
+  list and leaves the source unchanged (both from an empty source and a non-empty `persistentListOf(a)`);
+  the empty list has size zero.
+- **`PersistentSet`** — adding an element makes it a member; the empty set contains nothing.
+- **`PersistentMap`** — `put` then `get` returns the value; the empty map maps no key.
 
-- **element-array mutation** (`add`/`set`/`removeAt`/`put`) copies the persistent collections'
-  internal `Array<Any?>`, which meets the array-symex boundary
-  ([bmc4j#178](https://github.com/bmc4j/bmc4j/issues/178), exit 6 → UNKNOWN);
-- **list `contains`/`indexOf`** dispatches through the list iterator (a devirt-fragile path); the trie
-  lookups behind `PersistentSet.contains` / `PersistentMap.containsKey` prove cleanly.
+These exercise the persistent collections' real internals (the array-backed vector and the HAMT
+trie/node-array copies), proven for all inputs — the immutability law is the headline.
 
-Mutation/iteration laws will be reclaimed as the engine moves past these boundaries.
+### Engine boundaries we steer around
 
-## Running (once proofs exist)
+jbmc 6.9.0 limits a couple of shapes (all conservative — they fail to UNKNOWN/refute, never a false
+pass), so the proofs avoid them:
+
+- **`size()` / `isEmpty()` on a persistent set or map** dispatch through the `Set`/`Map`/`Collection`
+  interface and don't devirtualize to the concrete impl, so set/map laws assert via `contains` / `get`
+  only (list `size`/index resolve fine).
+- **Large multi-element construction** (e.g. two-element sets/maps built op-by-op) can time out; the
+  laws stay on small, bounded shapes.
+
+## Requirements & running
+
+This consumes bmc4j from a **GitHub Packages snapshot** (the pre-Central channel), which needs an
+authenticated token with `read:packages` even though the packages are public:
 
 ```bash
+# token via env (GITHUB_ACTOR + GITHUB_TOKEN) or -Pgpr.user=<you> -Pgpr.token=<PAT with read:packages>
 ./gradlew test          # every @BmcProof runs as a JUnit 5 test
 ```
 
-Each proof is symbolic — it holds for all inputs, not a sampled few — and deliberate failures are pinned
-with `expect = REFUTED / UNKNOWN`.
+In CI the workflow's own `GITHUB_TOKEN` provides this automatically. Consumer **Kotlin 2.4** is the
+floor (bmc4j 0.4.x). Each proof is symbolic — it holds for all inputs, not a sampled few.
 
 ## License
 

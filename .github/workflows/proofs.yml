@@ -32,6 +32,12 @@ jobs:
       # Run every @BmcProof (each is a JUnit 5 test). Capture the bmc4j progress/summary output and
       # don't fail the step yet — we post the report first, then fail the job below if any proof did.
       - name: Run proofs
+        # bmc4j is resolved from GitHub Packages (the snapshot channel), which requires auth even for
+        # public packages. The workflow's own GITHUB_TOKEN (+ GITHUB_ACTOR) reads bmc4j's org packages;
+        # settings.gradle.kts reads them from these env vars.
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
           if ./gradlew test --console=plain 2>&1 | tee proof-output.txt; then
