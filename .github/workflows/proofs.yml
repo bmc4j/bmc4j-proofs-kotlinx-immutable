@@ -40,7 +40,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
-          if ./gradlew test --console=plain 2>&1 | tee proof-output.txt; then
+          # -Dbmc.summaryDir makes bmc4j emit one structured JSONL record per proof (expected verdict,
+          # actual verdict, counterexample, kind, pass/fail) — the report reads that, so it can show
+          # the counterexample even for a proof that PASSED because a REFUTED/UNKNOWN was expected.
+          if ./gradlew test --console=plain -Dbmc.summaryDir="$GITHUB_WORKSPACE/proof-summary" 2>&1 | tee proof-output.txt; then
             echo "PROOFS_OK=1" >> "$GITHUB_ENV"
           else
             echo "PROOFS_OK=0" >> "$GITHUB_ENV"
@@ -50,46 +53,43 @@ jobs:
         if: ${{ always() }}
         uses: actions/github-script@v7
         with:
-          # Parse the JUnit XML (not stdout) so the report can show each refuted proof's
-          # COUNTEREXAMPLE, not just its verdict. A passing testcase is VERIFIED; a failing one
-          # carries the bmc4j exception type (BmcVerificationError -> REFUTED, BmcUndecidedError ->
-          # UNKNOWN) and a failure message whose "counterexample: ..." line is the witness JBMC found.
+          # Read bmc4j's structured per-proof JSONL (one object per proof: expected verdict, actual
+          # verdict, counterexample `detail`, `kind`, and `ok` = matched expectation). This is the only
+          # source that carries the counterexample even when a proof PASSED because a REFUTED/UNKNOWN
+          # was EXPECTED (a JUnit pass has no failure element). Schema: bmc4j ProofSummary.
           script: |
             const fs = require('fs'), path = require('path');
-            const dir = 'build/test-results/test';
-            const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.xml')) : [];
-            const dec = s => s.replace(/&#10;/g, '\n').replace(/&#13;/g, '').replace(/&quot;/g, '"')
-              .replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-            const results = [];
-            for (const f of files) {
-              const xml = fs.readFileSync(path.join(dir, f), 'utf8');
-              const cases = xml.match(/<testcase\b[\s\S]*?(?:\/>|<\/testcase>)/g) || [];
-              for (const c of cases) {
-                const name = (c.match(/\bname="([^"]*)"/) || [])[1] || '?';
-                const cls = (c.match(/\bclassname="([^"]*)"/) || [])[1] || '';
-                const simple = cls.split('.').pop();
-                const fail = c.match(/<failure\b[^>]*\btype="([^"]*)"[\s\S]*?<\/failure>/);
-                if (!fail) { results.push({ name, cls: simple, verdict: 'VERIFIED' }); continue; }
-                const verdict = fail[1].includes('BmcUndecidedError') ? 'UNKNOWN' : 'REFUTED';
-                const msg = dec(fail[0]);
-                const ce = (msg.match(/counterexample:\s*(.+)/) || [])[1];
-                results.push({ name, cls: simple, verdict, detail: ce ? ce.trim() : '' });
+            const dir = 'proof-summary';
+            const byProof = new Map();
+            if (fs.existsSync(dir)) {
+              for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
+                for (const line of fs.readFileSync(path.join(dir, f), 'utf8').split('\n')) {
+                  const t = line.trim();
+                  if (!t) continue;
+                  try { const r = JSON.parse(t); byProof.set(r.proof, r); } catch (_) {}
+                }
               }
             }
-            const order = { REFUTED: 0, UNKNOWN: 1, VERIFIED: 2 };
-            results.sort((a, b) => (order[a.verdict] - order[b.verdict]) || a.name.localeCompare(b.name));
-            const emoji = { VERIFIED: '✅', REFUTED: '❌', UNKNOWN: '⚠️' };
+            const results = [...byProof.values()].map(r => ({
+              proof: (r.proof || '?').split('.').slice(-2).join('.'),
+              expected: r.expected || 'VERIFIED',
+              actual: r.kind ? `${r.verdict} (${r.kind})` : (r.verdict || '?'),
+              detail: (r.detail || '').trim(),
+              ok: r.ok === true,
+            }));
+            // Mismatches (a proof that didn't meet its expectation) first, then by name.
+            results.sort((a, b) => (a.ok - b.ok) || a.proof.localeCompare(b.proof));
             const n = results.length;
-            const c = v => results.filter(r => r.verdict === v).length;
-            const tally = n
-              ? `${n} proofs → ${c('VERIFIED')} verified, ${c('REFUTED')} refuted, ${c('UNKNOWN')} unknown`
-              : '(no proofs ran)';
+            const passed = results.filter(r => r.ok).length;
+            const tally = n ? `${n} proofs → ${passed} matched expectation, ${n - passed} mismatched`
+                            : '(no proofs ran)';
             const rows = results.map(r =>
-              `| \`${r.cls}.${r.name}\` | ${emoji[r.verdict]} ${r.verdict} | ${r.detail ? '`' + r.detail + '`' : ''} |`);
+              `| \`${r.proof}\` | ${r.expected} | ${r.ok ? '✅' : '❌'} ${r.actual} | ${r.detail ? '`' + r.detail + '`' : ''} |`);
             const marker = '<!-- bmc4j-proof-report -->';
             const body = [
               marker, '## bmc4j proof results', '', '`' + tally + '`', '',
-              n ? ['| Proof | Verdict | Counterexample |', '|---|---|---|', ...rows].join('\n') : '_No proofs ran._',
+              n ? ['| Proof | Expected | Actual | Counterexample |', '|---|---|---|---|', ...rows].join('\n')
+                : '_No proofs ran._',
             ].join('\n');
             await core.summary.addRaw(body).write();
             if (context.eventName === 'pull_request') {
