@@ -1,5 +1,6 @@
 package proofs.set
 
+import kotlinx.collections.immutable.persistentHashSetOf
 import kotlinx.collections.immutable.persistentSetOf
 import org.bmc4j.Bmc
 import org.bmc4j.BmcProof
@@ -28,5 +29,18 @@ class PersistentSetLaws {
         val s = persistentSetOf<Int>()
         val x = Bmc.anyInt()
         Bmc.check(!s.contains(x))
+    }
+
+    /**
+     * Idempotence: adding the same element twice is the same as adding it once — the element is a
+     * member, for every value. Uses the unordered HAMT set (`persistentHashSetOf`); the ordered
+     * `persistentSetOf` carries insertion-order link bookkeeping that makes a second op pathological
+     * for jbmc, and order is irrelevant to this property.
+     */
+    @BmcProof
+    fun add_twice_is_idempotent() {
+        val x = Bmc.anyInt()
+        val s = persistentHashSetOf<Int>().add(x).add(x)
+        Bmc.check(s.contains(x))
     }
 }

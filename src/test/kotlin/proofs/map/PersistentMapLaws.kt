@@ -1,5 +1,6 @@
 package proofs.map
 
+import kotlinx.collections.immutable.persistentHashMapOf
 import kotlinx.collections.immutable.persistentMapOf
 import org.bmc4j.Bmc
 import org.bmc4j.BmcProof
@@ -29,5 +30,20 @@ class PersistentMapLaws {
         val m = persistentMapOf<Int, Int>()
         val k = Bmc.anyInt()
         Bmc.check(!m.containsKey(k) && m[k] == null)
+    }
+
+    /**
+     * Last-write-wins: putting the same key twice keeps the latest value — for every key and both
+     * values. Uses the unordered HAMT map (`persistentHashMapOf`); the ordered `persistentMapOf`
+     * carries insertion-order link bookkeeping that makes a second op pathological for jbmc, and
+     * order is irrelevant to this property.
+     */
+    @BmcProof
+    fun put_twice_keeps_the_latest_value() {
+        val k = Bmc.anyInt()
+        val v1 = Bmc.anyInt()
+        val v2 = Bmc.anyInt()
+        val m = persistentHashMapOf<Int, Int>().put(k, v1).put(k, v2)
+        Bmc.check(m[k] == v2)
     }
 }
