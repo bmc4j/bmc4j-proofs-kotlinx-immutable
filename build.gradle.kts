@@ -5,7 +5,7 @@ plugins {
     // is just a JUnit 5 test. A GitHub Packages SNAPSHOT (tag-shortsha) of current main — it carries the
     // kotlin-facade models (ArraysKt/MathKt/CharsKt) that the structural proofs here need, which the
     // 0.4.x Central releases predate. Bump to a Central release once one ships with those models.
-    id("org.bmc4j") version "0.4.4-57cf98f"
+    id("org.bmc4j") version "0.4.4-7572ff5"
 }
 
 kotlin {

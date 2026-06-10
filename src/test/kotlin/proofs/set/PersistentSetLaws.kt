@@ -8,19 +8,13 @@ import org.bmc4j.BmcProof
 /**
  * Proofs over `kotlinx.collections.immutable.PersistentSet` (HAMT-backed), analyzed as shipped.
  * Each holds for every symbolic input.
- *
- * Note: `size()`/`isEmpty()` on a persistent set dispatch through the `Set`/`Collection` interface
- * and don't devirtualize to the concrete impl under jbmc 6.9.0 (they nondet-stub → conservative
- * refute, never a false pass), so these laws assert membership via `contains` only.
  */
 class PersistentSetLaws {
 
-    /** Adding an element makes it a member — for every value. */
     @BmcProof
-    fun add_then_contains() {
-        val x = Bmc.anyInt()
-        val s = persistentSetOf<Int>().add(x)
-        Bmc.check(s.contains(x))
+    fun empty_set_has_size_zero() {
+        val s = persistentSetOf<Int>()
+        Bmc.check(s.size == 0 && s.isEmpty())
     }
 
     /** The empty set contains no element — for every probe value. */
@@ -31,16 +25,23 @@ class PersistentSetLaws {
         Bmc.check(!s.contains(x))
     }
 
+    /** Adding an element makes it a member and the set has size one — for every value. */
+    @BmcProof
+    fun add_then_contains_with_size_one() {
+        val x = Bmc.anyInt()
+        val s = persistentSetOf<Int>().add(x)
+        Bmc.check(s.contains(x) && s.size == 1)
+    }
+
     /**
-     * Idempotence: adding the same element twice is the same as adding it once — the element is a
-     * member, for every value. Uses the unordered HAMT set (`persistentHashSetOf`); the ordered
-     * `persistentSetOf` carries insertion-order link bookkeeping that makes a second op pathological
-     * for jbmc, and order is irrelevant to this property.
+     * Idempotence: adding the same element twice is the same as adding it once. Uses the unordered
+     * HAMT set (`persistentHashSetOf`) — the ordered `persistentSetOf` carries insertion-order link
+     * bookkeeping that makes a second op pathological for jbmc, and order is irrelevant here.
      */
     @BmcProof
     fun add_twice_is_idempotent() {
         val x = Bmc.anyInt()
         val s = persistentHashSetOf<Int>().add(x).add(x)
-        Bmc.check(s.contains(x))
+        Bmc.check(s.contains(x) && s.size == 1)
     }
 }

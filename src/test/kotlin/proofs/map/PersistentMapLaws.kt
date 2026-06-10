@@ -8,23 +8,15 @@ import org.bmc4j.BmcProof
 /**
  * Proofs over `kotlinx.collections.immutable.PersistentMap` (HAMT-backed), analyzed as shipped.
  * Each holds for every symbolic key/value.
- *
- * Note: `size()`/`isEmpty()` on a persistent map dispatch through the `Map` interface and don't
- * devirtualize under jbmc 6.9.0 (they nondet-stub → conservative refute, never a false pass), so
- * these laws assert via `get`/`containsKey` only.
  */
 class PersistentMapLaws {
 
-    /** `put` then look the key back up — the inserted value comes back, for every key and value. */
     @BmcProof
-    fun put_then_get_returns_the_value() {
-        val k = Bmc.anyInt()
-        val v = Bmc.anyInt()
-        val m = persistentMapOf<Int, Int>().put(k, v)
-        Bmc.check(m[k] == v)
+    fun empty_map_has_size_zero() {
+        val m = persistentMapOf<Int, Int>()
+        Bmc.check(m.size == 0 && m.isEmpty())
     }
 
-    /** The empty map has no mapping for any key — for every probe key. */
     @BmcProof
     fun empty_map_has_no_key() {
         val m = persistentMapOf<Int, Int>()
@@ -32,11 +24,19 @@ class PersistentMapLaws {
         Bmc.check(!m.containsKey(k) && m[k] == null)
     }
 
+    /** `put` then look the key back up — the inserted value comes back and the map has size one. */
+    @BmcProof
+    fun put_then_get_with_size_one() {
+        val k = Bmc.anyInt()
+        val v = Bmc.anyInt()
+        val m = persistentMapOf<Int, Int>().put(k, v)
+        Bmc.check(m[k] == v && m.size == 1)
+    }
+
     /**
-     * Last-write-wins: putting the same key twice keeps the latest value — for every key and both
-     * values. Uses the unordered HAMT map (`persistentHashMapOf`); the ordered `persistentMapOf`
-     * carries insertion-order link bookkeeping that makes a second op pathological for jbmc, and
-     * order is irrelevant to this property.
+     * Last-write-wins: putting the same key twice keeps the latest value. Uses the unordered HAMT
+     * map (`persistentHashMapOf`) — the ordered `persistentMapOf` carries insertion-order link
+     * bookkeeping that makes a second op pathological for jbmc, and order is irrelevant here.
      */
     @BmcProof
     fun put_twice_keeps_the_latest_value() {
@@ -44,6 +44,6 @@ class PersistentMapLaws {
         val v1 = Bmc.anyInt()
         val v2 = Bmc.anyInt()
         val m = persistentHashMapOf<Int, Int>().put(k, v1).put(k, v2)
-        Bmc.check(m[k] == v2)
+        Bmc.check(m[k] == v2 && m.size == 1)
     }
 }

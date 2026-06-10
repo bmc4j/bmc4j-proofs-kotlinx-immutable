@@ -24,22 +24,19 @@ symbolic input over the library's shipped bytecode:
 - **`PersistentList`** — `add` then read returns the element; **immutability**: `add` produces a new
   list and leaves the source unchanged (both from an empty source and a non-empty `persistentListOf(a)`);
   the empty list has size zero.
-- **`PersistentSet`** — adding an element makes it a member; the empty set contains nothing.
-- **`PersistentMap`** — `put` then `get` returns the value; the empty map maps no key.
+- **`PersistentSet`** — adding an element makes it a member (size one); the empty set contains nothing
+  and has size zero; **idempotence**: `add(x).add(x)` is the same as `add(x)`.
+- **`PersistentMap`** — `put` then `get` returns the value (size one); the empty map maps no key and has
+  size zero; **last-write-wins**: `put(k, v1).put(k, v2)` keeps `v2`.
 
 These exercise the persistent collections' real internals (the array-backed vector and the HAMT
 trie/node-array copies), proven for all inputs — the immutability law is the headline.
 
-### Engine boundaries we steer around
+### A note on shapes
 
-jbmc 6.9.0 limits a couple of shapes (all conservative — they fail to UNKNOWN/refute, never a false
-pass), so the proofs avoid them:
-
-- **`size()` / `isEmpty()` on a persistent set or map** dispatch through the `Set`/`Map`/`Collection`
-  interface and don't devirtualize to the concrete impl, so set/map laws assert via `contains` / `get`
-  only (list `size`/index resolve fine).
-- **Large multi-element construction** (e.g. two-element sets/maps built op-by-op) can time out; the
-  laws stay on small, bounded shapes.
+The multi-op laws (idempotence, last-write-wins) use the unordered `persistentHashSetOf`/
+`persistentHashMapOf`: the *ordered* `persistentSetOf`/`persistentMapOf` maintain insertion-order links
+that make a second operation pathological for jbmc, and order is irrelevant to those properties.
 
 ## Requirements & running
 
