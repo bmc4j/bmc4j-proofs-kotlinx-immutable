@@ -70,11 +70,20 @@ jobs:
                 }
               }
             }
+            // `detail` is bmc4j's full refutation message; pull out just the "counterexample: <vals>"
+            // witness for the column (fall back to a short clip for UNKNOWN reasons that have none).
+            const witness = d => {
+              const t = (d || '').trim();
+              if (!t) return '';
+              const m = t.match(/counterexample:\s*([^]*?)(?:\s+replay:|$)/);
+              if (m) return m[1].trim();
+              return t.length > 120 ? t.slice(0, 120) + '…' : t;
+            };
             const results = [...byProof.values()].map(r => ({
               proof: (r.proof || '?').split('.').slice(-2).join('.'),
               expected: r.expected || 'VERIFIED',
               actual: r.kind ? `${r.verdict} (${r.kind})` : (r.verdict || '?'),
-              detail: (r.detail || '').trim(),
+              detail: witness(r.detail),
               ok: r.ok === true,
             }));
             // Mismatches (a proof that didn't meet its expectation) first, then by name.

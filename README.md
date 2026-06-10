@@ -32,6 +32,11 @@ symbolic input over the library's shipped bytecode:
 These exercise the persistent collections' real internals (the array-backed vector and the HAMT
 trie/node-array copies), proven for all inputs — the immutability law is the headline.
 
+A couple of **fail-on-purpose demos** (`@BmcProof(expect = REFUTED)`) assert deliberately-false claims
+(e.g. "the empty set contains this element"); they pass by being refuted, and the PR proof-results
+report shows the **counterexample** bmc4j found (e.g. `x = 15`) alongside Expected/Actual — so a real
+regression (the claim becoming un-refutable) would fail the build.
+
 ### A note on shapes
 
 The multi-op laws (idempotence, last-write-wins) use the unordered `persistentHashSetOf`/
