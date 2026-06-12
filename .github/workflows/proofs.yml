@@ -32,9 +32,18 @@ jobs:
       # Run every @BmcProof (each is a JUnit 5 test). Capture the bmc4j progress/summary output and
       # don't fail the step yet — we post the report first, then fail the job below if any proof did.
       - name: Run proofs
+        # bmc4j is resolved from GitHub Packages (the snapshot channel), which requires auth even for
+        # public packages. The workflow's own GITHUB_TOKEN (+ GITHUB_ACTOR) reads bmc4j's org packages;
+        # settings.gradle.kts reads them from these env vars.
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -o pipefail
-          if ./gradlew test --console=plain 2>&1 | tee proof-output.txt; then
+          # -Dbmc.summaryDir makes bmc4j emit one structured JSONL record per proof (expected verdict,
+          # actual verdict, counterexample, kind, pass/fail) — the report reads that, so it can show
+          # the counterexample even for a proof that PASSED because a REFUTED/UNKNOWN was expected.
+          if ./gradlew test --console=plain -Dbmc.summaryDir="$GITHUB_WORKSPACE/proof-summary" 2>&1 | tee proof-output.txt; then
             echo "PROOFS_OK=1" >> "$GITHUB_ENV"
           else
             echo "PROOFS_OK=0" >> "$GITHUB_ENV"
@@ -44,23 +53,52 @@ jobs:
         if: ${{ always() }}
         uses: actions/github-script@v7
         with:
+          # Read bmc4j's structured per-proof JSONL (one object per proof: expected verdict, actual
+          # verdict, counterexample `detail`, `kind`, and `ok` = matched expectation). This is the only
+          # source that carries the counterexample even when a proof PASSED because a REFUTED/UNKNOWN
+          # was EXPECTED (a JUnit pass has no failure element). Schema: bmc4j ProofSummary.
           script: |
-            const fs = require('fs');
-            const out = fs.existsSync('proof-output.txt') ? fs.readFileSync('proof-output.txt', 'utf8') : '';
-            // Per-proof lines: "  bmc4j < OK      Class.method() (1.2s)"
-            const emoji = { OK: '✅', VERIFIED: '✅', REFUTED: '❌', UNKNOWN: '⚠️', ERROR: '🛑', SKIP: '⏭️' };
-            const rows = [...out.matchAll(/bmc4j < (\S+)\s+(\S+)\s+\(([^)]*)\)/g)]
-              .map(m => `| \`${m[2]}\` | ${emoji[m[1]] || ''} ${m[1]} | ${m[3]} |`);
-            // Final tally: "bmc4j: N proofs -> V verified, R refuted, U unknown (Ts)"
-            const tally = (out.match(/bmc4j: \d+ proofs ->.*/g) || []).slice(-1)[0] || '(no bmc4j summary — no proofs ran)';
+            const fs = require('fs'), path = require('path');
+            const dir = 'proof-summary';
+            const byProof = new Map();
+            if (fs.existsSync(dir)) {
+              for (const f of fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'))) {
+                for (const line of fs.readFileSync(path.join(dir, f), 'utf8').split('\n')) {
+                  const t = line.trim();
+                  if (!t) continue;
+                  try { const r = JSON.parse(t); byProof.set(r.proof, r); } catch (_) {}
+                }
+              }
+            }
+            // `detail` is bmc4j's full refutation message; pull out just the "counterexample: <vals>"
+            // witness for the column (fall back to a short clip for UNKNOWN reasons that have none).
+            const witness = d => {
+              const t = (d || '').trim();
+              if (!t) return '';
+              const m = t.match(/counterexample:\s*([^]*?)(?:\s+replay:|$)/);
+              if (m) return m[1].trim();
+              return t.length > 120 ? t.slice(0, 120) + '…' : t;
+            };
+            const results = [...byProof.values()].map(r => ({
+              proof: (r.proof || '?').split('.').slice(-2).join('.'),
+              expected: r.expected || 'VERIFIED',
+              actual: r.kind ? `${r.verdict} (${r.kind})` : (r.verdict || '?'),
+              detail: witness(r.detail),
+              ok: r.ok === true,
+            }));
+            // Mismatches (a proof that didn't meet its expectation) first, then by name.
+            results.sort((a, b) => (a.ok - b.ok) || a.proof.localeCompare(b.proof));
+            const n = results.length;
+            const passed = results.filter(r => r.ok).length;
+            const tally = n ? `${n} proofs → ${passed} matched expectation, ${n - passed} mismatched`
+                            : '(no proofs ran)';
+            const rows = results.map(r =>
+              `| \`${r.proof}\` | ${r.expected} | ${r.ok ? '✅' : '❌'} ${r.actual} | ${r.detail ? '`' + r.detail + '`' : ''} |`);
             const marker = '<!-- bmc4j-proof-report -->';
             const body = [
-              marker,
-              '## bmc4j proof results',
-              '',
-              '`' + tally + '`',
-              '',
-              rows.length ? ['| Proof | Verdict | Time |', '|---|---|---|', ...rows].join('\n') : '_No proofs ran yet._',
+              marker, '## bmc4j proof results', '', '`' + tally + '`', '',
+              n ? ['| Proof | Expected | Actual | Counterexample |', '|---|---|---|---|', ...rows].join('\n')
+                : '_No proofs ran._',
             ].join('\n');
             await core.summary.addRaw(body).write();
             if (context.eventName === 'pull_request') {

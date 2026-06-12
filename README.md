@@ -18,17 +18,43 @@ This repo is intentionally **one library per repo** (spin up a sibling repo for 
 
 ## Status
 
-🚧 **Scaffolding only — no proofs yet.** Proofs land once a bmc4j **release candidate** is published; the
-plugin version in `build.gradle.kts` (`0.2.0-RC1`) is a placeholder to bump when the RC is cut.
+Structural proofs over `PersistentList` / `PersistentSet` / `PersistentMap`, each holding for *every*
+symbolic input over the library's shipped bytecode:
 
-## Running (once proofs exist)
+- **`PersistentList`** — `add` then read returns the element; **immutability**: `add` produces a new
+  list and leaves the source unchanged (both from an empty source and a non-empty `persistentListOf(a)`);
+  the empty list has size zero.
+- **`PersistentSet`** — adding an element makes it a member (size one); the empty set contains nothing
+  and has size zero; **idempotence**: `add(x).add(x)` is the same as `add(x)`.
+- **`PersistentMap`** — `put` then `get` returns the value (size one); the empty map maps no key and has
+  size zero; **last-write-wins**: `put(k, v1).put(k, v2)` keeps `v2`.
+
+These exercise the persistent collections' real internals (the array-backed vector and the HAMT
+trie/node-array copies), proven for all inputs — the immutability law is the headline.
+
+A couple of **fail-on-purpose demos** (`@BmcProof(expect = REFUTED)`) assert deliberately-false claims
+(e.g. "the empty set contains this element"); they pass by being refuted, and the PR proof-results
+report shows the **counterexample** bmc4j found (e.g. `x = 15`) alongside Expected/Actual — so a real
+regression (the claim becoming un-refutable) would fail the build.
+
+### A note on shapes
+
+The multi-op laws (idempotence, last-write-wins) use the unordered `persistentHashSetOf`/
+`persistentHashMapOf`: the *ordered* `persistentSetOf`/`persistentMapOf` maintain insertion-order links
+that make a second operation pathological for jbmc, and order is irrelevant to those properties.
+
+## Requirements & running
+
+This consumes bmc4j from a **GitHub Packages snapshot** (the pre-Central channel), which needs an
+authenticated token with `read:packages` even though the packages are public:
 
 ```bash
+# token via env (GITHUB_ACTOR + GITHUB_TOKEN) or -Pgpr.user=<you> -Pgpr.token=<PAT with read:packages>
 ./gradlew test          # every @BmcProof runs as a JUnit 5 test
 ```
 
-Each proof is symbolic — it holds for all inputs, not a sampled few — and deliberate failures are pinned
-with `expect = REFUTED / UNKNOWN`.
+In CI the workflow's own `GITHUB_TOKEN` provides this automatically. Consumer **Kotlin 2.4** is the
+floor (bmc4j 0.4.x). Each proof is symbolic — it holds for all inputs, not a sampled few.
 
 ## License
 
